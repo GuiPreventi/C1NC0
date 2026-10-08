@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.venv/
+.runlogs/
+__pycache__/
+*.py[cod]
+backend/models/*
+!backend/models/gaussian_nb_pipeline.joblib
+!backend/models/tfidf_vectorizer.joblib
+!backend/models/multinomial_nb.joblib
+!backend/models/model_metadata.json
+backend/evaluation_results.csv
+.env
+.env.local
+.env.*.local
+!.env.example
