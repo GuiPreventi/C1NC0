@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import socket
@@ -108,6 +109,104 @@ def meta(soup: BeautifulSoup, *keys: str) -> str | None:
     return None
 
 
+def _author_name(value: object) -> str | None:
+    if isinstance(value, list):
+        names = [_author_name(item) for item in value]
+        unique = list(dict.fromkeys(name for name in names if name))
+        return ", ".join(unique) or None
+    if isinstance(value, dict):
+        name = value.get("name")
+        if isinstance(name, str) and name.strip():
+            return re.sub(r"\s+", " ", name).strip()[:160]
+        given, family = value.get("givenName"), value.get("familyName")
+        if isinstance(given, str) and isinstance(family, str):
+            return re.sub(r"\s+", " ", f"{given} {family}").strip()[:160]
+        return None
+    if isinstance(value, str):
+        name = re.sub(r"\s+", " ", value).strip()
+        name = re.sub(r"^(?:escrito\s+por|por|by)\s*:?\s*", "", name, flags=re.IGNORECASE)
+        if name and len(name) <= 160 and not name.startswith(("http://", "https://")):
+            return name
+    return None
+
+
+def _join_author_names(names: list[str]) -> str | None:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        parts = re.split(r"\s*(?:,|;|&)\s*", name)
+        for part in parts:
+            normalized = re.sub(r"\s+", " ", part).strip()
+            key = normalized.casefold()
+            if normalized and key not in seen:
+                seen.add(key)
+                unique.append(normalized)
+    return ", ".join(unique) or None
+
+
+def extract_author(soup: BeautifulSoup, article: BeautifulSoup) -> str | None:
+    author = _author_name(meta(
+        soup, "author", "article:author", "parsely-author", "author_name",
+        "citation_author", "dc.creator", "dcterms.creator",
+    ))
+    authors = [author] if author else []
+
+    structured_authors: list[tuple[int, str]] = []
+
+    def visit_jsonld(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit_jsonld(item)
+        elif isinstance(value, dict):
+            types = value.get("@type", [])
+            if isinstance(types, str):
+                types = [types]
+            article_type = any(str(item).lower() in {"article", "newsarticle", "blogposting", "reportagearticle"} for item in types)
+            if value.get("author") is not None:
+                candidate = _author_name(value["author"])
+                if candidate:
+                    structured_authors.append((0 if article_type else 1, candidate))
+            for key, nested in value.items():
+                if key in {"@graph", "mainEntity", "mainEntityOfPage", "article", "itemListElement"}:
+                    visit_jsonld(nested)
+
+    for script in soup.find_all("script", attrs={"type": re.compile(r"application/ld\+json", re.I)}):
+        try:
+            visit_jsonld(json.loads(script.string or script.get_text()))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    if structured_authors:
+        best_priority = min(priority for priority, _ in structured_authors)
+        authors.extend(name for priority, name in structured_authors if priority == best_priority)
+
+    # G1 and some other publishers expose the byline as a link to an author page.
+    linked_authors: list[str] = []
+    for scope in (article, soup):
+        for element in scope.select('a[href*="/autores/"]'):
+            candidate = _author_name(element.get_text(" ", strip=True) or element.get("aria-label") or element.get("title"))
+            if candidate:
+                linked_authors.append(candidate)
+    authors.extend(linked_authors)
+    if linked_authors:
+        return _join_author_names(authors)
+
+    selectors = (
+        '[rel~="author"]', '[itemprop="author"]',
+        '[data-testid*="byline" i]', '[data-testid*="author" i]',
+        '[class*="byline" i]', '[class*="author-name" i]', '[class*="article-author" i]',
+    )
+    for selector in selectors:
+        selector_authors: list[str] = []
+        for element in article.select(selector):
+            candidate = _author_name(element.get("content") or element.get_text(" ", strip=True))
+            if candidate:
+                selector_authors.append(candidate)
+        if selector_authors:
+            authors.extend(selector_authors)
+            break
+    return _join_author_names(authors)
+
+
 def extract_key_points(paragraphs: list[str]) -> list[str]:
     sentences = [sentence.strip() for paragraph in paragraphs for sentence in re.split(r"(?<=[.!?])\s+", paragraph)]
     sentences = [sentence for sentence in sentences if 55 <= len(sentence) <= 360]
@@ -155,7 +254,7 @@ def build_checklist(page: dict, key_points: list[str]) -> list[dict[str, str]]:
         source_question = "A matéria não apresenta links para outros sites. Você consegue localizar a fonte original das informações?"
 
     date_question = "A data de publicação indicada na página é coerente com o período dos acontecimentos descritos?" if page["date"] != "Data não identificada" else "A data de publicação está indicada? Ela combina com o período dos acontecimentos descritos?"
-    author_question = "É possível confirmar quem escreveu a matéria e encontrar as fontes usadas?" if page["author"] else "A autoria não aparece nesta página. Você consegue encontrar quem escreveu e quais fontes foram usadas?"
+    author_question = "É possível confirmar quem escreveu a matéria e encontrar as fontes usadas?" if page["author"] else "A autoria não foi localizada nesta leitura. Você consegue encontrar quem escreveu e quais fontes foram usadas?"
     return [
         {"id": "main-claim", "text": f'O texto apresenta dados, documentos ou fontes que sustentem a afirmação do título: “{short_title}”?'.replace("“…”", "…")},
         {"id": "specific-detail", "text": detail_question},
@@ -187,7 +286,7 @@ def build_attention_points(page: dict) -> list[dict[str, str]]:
     if not page["author"]:
         points.append({
             "title": "Autoria não identificada",
-            "detail": "Não encontramos o nome de quem escreveu a matéria nos dados da página.",
+            "detail": "Não localizamos um nome de autoria nos dados que esta página disponibilizou para leitura. Alguns sites não incluem esse dado ou o exibem de uma forma que a ferramenta não consegue reconhecer.",
         })
     if page["date"] == "Data não identificada":
         points.append({
@@ -204,6 +303,8 @@ def build_attention_points(page: dict) -> list[dict[str, str]]:
 
 def analyze_page(url: str, html: str, final_url: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
+    article = soup.find("article") or soup.find("main") or soup
+    author = extract_author(soup, article)
     for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form"]):
         tag.decompose()
     title_tag = soup.find("h1")
@@ -216,11 +317,9 @@ def analyze_page(url: str, html: str, final_url: str) -> dict:
     if image_url and urlparse(image_url).scheme not in {"http", "https"}:
         image_url = None
     description = meta(soup, "description", "og:description", "twitter:description")
-    article = soup.find("article") or soup.find("main") or soup
     paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p") if len(p.get_text(" ", strip=True)) >= 30]
     body_text = " ".join(paragraphs)
     summary = description or " ".join(paragraphs[:2])[:700] or "Não foi possível extrair um resumo textual desta página."
-    author = meta(soup, "author", "article:author", "parsely-author")
     date_value = meta(soup, "article:published_time", "date", "datePublished", "pubdate")
     if not date_value:
         date_tag = soup.find("time")

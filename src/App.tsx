@@ -27,7 +27,7 @@ function NewsSummary({ result }: { result: NewsAnalysis }) {
       <span className="image-tag"><ScanSearch size={12} /> {result.imageUrl && !imageFailed ? 'IMAGEM DA NOTÍCIA' : 'PÁGINA ANALISADA'}</span>
       {(!result.imageUrl || imageFailed) && <div className="image-center"><Orbit size={36} strokeWidth={1} /><span>c1 / scan</span></div>}
     </div>
-    <div className="summary-content"><div className="summary-label"><span className="live-mark" /> RESUMO DA NOTÍCIA <span className="summary-demo">CONTEÚDO DA PÁGINA</span></div><h3>{result.title}</h3><p>{result.summary}</p><div className="summary-meta"><span><span className="meta-key">SITE</span>{result.domain}</span><span className="publication-meta"><span className="meta-key">PUBLICADA EM</span><span className="publication-values"><CalendarDays size={14} /><time dateTime={result.date}>{publication.date}</time>{publication.time && <span className="publication-time"><Clock3 size={13} /><time dateTime={result.date}>{publication.time}</time></span>}</span></span><span><span className="meta-key">AUTORIA</span>{result.author ?? 'Não identificada'}</span></div></div>
+    <div className="summary-content"><div className="summary-label"><span className="live-mark" /> RESUMO DA NOTÍCIA <span className="summary-demo">CONTEÚDO DA PÁGINA</span></div><h3>{result.title}</h3><p>{result.summary}</p><div className="summary-meta"><span><span className="meta-key">SITE</span>{result.domain}</span><span className="publication-meta"><span className="meta-key">PUBLICADA EM</span><span className="publication-values"><CalendarDays size={14} /><time dateTime={result.date}>{publication.date}</time>{publication.time && <span className="publication-time"><Clock3 size={13} /><time dateTime={result.date}>{publication.time}</time></span>}</span></span><span><span className="meta-key">AUTORIA</span>{result.author ?? 'Não localizada na página'}</span></div></div>
   </motion.section>
 }
 function EvidenceOverview({ result }: { result: NewsAnalysis }) { return <section className="results-section"><div className="results-heading"><div><div className="section-marker"><span>02</span><span className="marker-rule" /> LEITURA DOS ELEMENTOS</div><h2>O que encontramos<span className="heading-period">.</span></h2></div><span className="cards-hint">SELECIONE UM CARTÃO<br />PARA EXPLORAR OS DETALHES <ArrowDown size={13} /></span></div><NewsSummary result={result} /><div className="evidence-grid">{result.evidence.map((item, i) => <EvidenceCard key={item.title} item={item} index={i} />)}</div></section> }
@@ -95,7 +95,7 @@ function PageSignalsChart({ metrics }: { metrics: NonNullable<NaiveBayesResult['
     <div className="nb-page-signals-chart" role="img" aria-label={rows.map(row => `${row.label}: ${row.display}`).join('. ')}>
       {rows.map(row => <div className="nb-page-signal" key={row.label}><div><span>{row.label}</span><strong>{row.display}</strong></div><div className="nb-page-signal-track"><i style={{ width: `${Math.max(0, Math.min(row.value, 100))}%` }} /></div></div>)}
     </div>
-    <div className="nb-model-explanation"><p>Este gráfico mostra características observadas diretamente na página. Uma barra maior indica mais presença daquele aspecto; isso, sozinho, não determina se a notícia é verdadeira ou falsa.</p><ul><li>{metrics.undestinedLinks} de {metrics.totalLinks} links não têm um destino utilizável.</li><li>{metrics.wordCount} palavras foram identificadas no título e no conteúdo.</li></ul></div>
+    <div className="nb-model-explanation"><p>Este gráfico mostra características observadas diretamente na página. Uma barra maior indica mais presença daquele aspecto; isso, sozinho, não determina se a notícia é verdadeira ou falsa.</p><ul><li>{metrics.undestinedLinks} de {metrics.totalLinks} links não têm um destino utilizável.</li><li>A leitura considerou {metrics.wordCount} palavras do título e do texto. Esse número mostra o volume de conteúdo disponível para análise, não a confiabilidade da notícia.</li></ul></div>
   </div>
 }
 function AttentionMenu({ points }: { points: NewsAnalysis['attentionPoints'] }) {
@@ -122,8 +122,8 @@ function NaiveBayesOverview({ result }: { result: NewsAnalysis }) {
   } : {
     distribution: analysis.metricDistributions?.titleContent ?? analysis.textDistribution,
     center: 'TEXTO',
-    description: 'Mostra como o tamanho da matéria, as palavras diferentes e a presença de termos do título no conteúdo foram avaliados nesta notícia.',
-    metrics: metrics ? [`${metrics.wordCount} palavras identificadas`, `${metrics.titleCoherence}% dos termos do título aparecem no texto`, `${metrics.lexicalDiversity}% de palavras diferentes no texto`] : [],
+    description: 'Mostra características do texto. A quantidade de palavras indica quanto conteúdo estava disponível para leitura; não é um sinal de que a notícia seja verdadeira ou falsa.',
+    metrics: metrics ? [`Volume de texto lido: ${metrics.wordCount} palavras`, `${metrics.titleCoherence}% dos termos do título aparecem no texto`, `${metrics.lexicalDiversity}% de palavras diferentes no texto`] : [],
   }
   const activeChartAvailable = activeChart === 'pageSignals' ? metrics !== null : analysis.metricDistributions !== null
   return <section className="distribution-section nb-section" id="metodo">
