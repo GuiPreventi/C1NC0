@@ -3,7 +3,7 @@
   "functions": {
     "backend/app.py": {
       "maxDuration": 60,
-      "includeFiles": "backend/models/*.joblib"
+      "includeFiles": "{backend/models/*.joblib,dist/**}"
     }
   }
 }
